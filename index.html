@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detour — Worth-the-Stop Gas Calculator</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;600&family=Spline+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2230; --line:#2a3140;
+    --ink:#e7ecf2; --dim:#8b97a8; --faint:#5b6675;
+    --accent:#ff8c32;      /* highway amber */
+    --good:#43d17a; --bad:#ff5d5d; --route:#4ba3ff;
+    --r:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(900px 500px at 85% -5%, rgba(255,140,50,.10), transparent 60%),
+      radial-gradient(700px 500px at -5% 110%, rgba(75,163,255,.08), transparent 60%),
+      var(--bg);
+    color:var(--ink); font-family:"Spline Sans",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;font-size:30px;margin:0;letter-spacing:-.5px}
+  h1 .dot{color:var(--accent)}
+  .tag{color:var(--dim);font-size:13.5px;max-width:640px;line-height:1.45}
+  .layout{display:grid;grid-template-columns:380px 1fr;gap:18px;margin-top:20px}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+  .card h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:13px;letter-spacing:1.5px;
+    text-transform:uppercase;color:var(--dim);margin:0 0 12px}
+
+  label{display:block;font-size:12px;color:var(--dim);margin:0 0 5px;letter-spacing:.3px}
+  input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:10px 11px;font-size:14px;font-family:inherit;outline:none}
+  input:focus{border-color:var(--accent)}
+  .field{margin-bottom:12px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .mono input{font-family:"IBM Plex Mono",monospace}
+
+  .econ summary{cursor:pointer;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);
+    margin:6px 0 12px;outline:none;user-select:none}
+  .econ summary::marker{color:var(--accent)}
+
+  button.go{width:100%;margin-top:6px;background:var(--accent);color:#171008;border:none;border-radius:10px;
+    padding:13px;font-size:15px;font-weight:700;font-family:"Bricolage Grotesque",sans-serif;letter-spacing:.3px;
+    cursor:pointer;transition:filter .15s,transform .05s}
+  button.go:hover{filter:brightness(1.08)}
+  button.go:active{transform:translateY(1px)}
+  button.go:disabled{opacity:.5;cursor:default}
+
+  #status{font-size:12.5px;color:var(--dim);min-height:18px;margin-top:10px;line-height:1.4}
+  #status.err{color:var(--bad)}
+
+  /* route options */
+  #routes{display:flex;flex-direction:column;gap:8px}
+  .ropt{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:9px;padding:10px 12px;cursor:pointer;transition:border-color .15s}
+  .ropt:hover{border-color:var(--faint)}
+  .ropt.sel{border-color:var(--accent);background:#241a10}
+  .ropt .nm{font-weight:600;font-size:14px}
+  .ropt .sub{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--dim)}
+
+  /* results */
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .sortbtn{background:var(--panel2);border:1px solid var(--line);color:var(--dim);border-radius:20px;
+    padding:6px 13px;font-size:12px;cursor:pointer;font-family:inherit}
+  .sortbtn.on{border-color:var(--accent);color:var(--ink)}
+  .count{margin-left:auto;font-size:12px;color:var(--faint);font-family:"IBM Plex Mono",monospace}
+
+  .stop{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:10px;
+    display:grid;grid-template-columns:1fr auto;gap:8px 16px;align-items:start}
+  .stop .name{font-weight:600;font-size:15.5px}
+  .stop .brand{display:inline-block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--accent);margin-bottom:3px}
+  .stop .addr{font-size:12px;color:var(--faint);margin-top:3px;line-height:1.4}
+  .metrics{display:flex;gap:18px;text-align:right;font-family:"IBM Plex Mono",monospace}
+  .metric .v{font-size:18px;font-weight:600;line-height:1.1}
+  .metric .k{font-size:10px;color:var(--faint);letter-spacing:.5px;text-transform:uppercase;margin-top:3px}
+  .verdict{grid-column:1/-1;border-top:1px solid var(--line);padding-top:10px;margin-top:2px;
+    font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .verdict .net{font-family:"IBM Plex Mono",monospace;font-weight:600}
+  .net.pos{color:var(--good)} .net.neg{color:var(--bad)}
+  .verdict .why{color:var(--dim);font-size:12px}
+
+  #map{height:520px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel)}
+  .empty{color:var(--faint);font-size:13.5px;text-align:center;padding:34px 10px;line-height:1.5}
+  .leaflet-popup-content{font-family:"Spline Sans",sans-serif;font-size:13px}
+  .foot{margin-top:18px;color:var(--faint);font-size:11.5px;line-height:1.5}
+  .foot code{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Detour<span class="dot">.</span></h1>
+    <div class="tag">You already know the warehouse club is cheaper. This tells you how far off your route it really is —
+      and whether the stop pays for itself once the extra driving is counted.</div>
+  </header>
+
+  <div class="layout">
+    <!-- LEFT: inputs -->
+    <div>
+      <div class="card">
+        <h2>Trip</h2>
+        <div class="field"><label>Start</label>
+          <input id="start" placeholder="Pontiac, MO" value=""></div>
+        <div class="field"><label>Destination</label>
+          <input id="end" placeholder="Owings, MD" value=""></div>
+        <div class="field"><label>Via (optional — force a corridor)</label>
+          <input id="via" placeholder="e.g. Nashville, TN"></div>
+
+        <details class="econ">
+          <summary>Trip economics &amp; search settings</summary>
+          <div class="grid2 mono">
+            <div class="field"><label>Price saved $/gal</label><input id="delta" value="0.30"></div>
+            <div class="field"><label>Gallons to fill</label><input id="gallons" value="20"></div>
+            <div class="field"><label>Vehicle MPG</label><input id="mpg" value="25"></div>
+            <div class="field"><label>Current $/gal</label><input id="price" value="3.10"></div>
+            <div class="field"><label>Detour avg mph</label><input id="speed" value="35"></div>
+            <div class="field"><label>Your time $/hr</label><input id="timeval" value="15"></div>
+          </div>
+          <div class="grid2 mono">
+            <div class="field"><label>Search width (mi each side)</label><input id="radius" value="6"></div>
+            <div class="field" style="grid-column:span 1"><label>&nbsp;</label></div>
+          </div>
+          <div class="field"><label>Brands to find (comma separated)</label>
+            <input id="brands" value="Sam's Club, Costco, Murphy, BJ's"></div>
+        </details>
+
+        <button class="go" id="go">Find stops along the route</button>
+        <div id="status"></div>
+      </div>
+
+      <div class="card" id="routesCard" style="margin-top:18px;display:none">
+        <h2>Route options</h2>
+        <div id="routes"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: map + results -->
+    <div>
+      <div id="map"></div>
+      <div class="toolbar" id="toolbar" style="display:none">
+        <span style="font-size:12px;color:var(--dim)">Sort:</span>
+        <button class="sortbtn on" data-sort="detour">Closest to route</button>
+        <button class="sortbtn" data-sort="value">Best value</button>
+        <span class="count" id="count"></span>
+      </div>
+      <div id="results">
+        <div class="empty">Enter a trip and hit search — warehouse-club fuel stops near your route will appear here,
+          ranked by how far off the route they actually are.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Locations from OpenStreetMap (Overpass) · routing from OSRM · geocoding from Nominatim — all free, no API key,
+    all called from your browser. Coverage depends on OSM, so a station can be missing or mistagged; widen the search
+    width or edit the brand list if something you expect isn't showing. Detour is an <em>estimate</em> (straight-line
+    to the nearest point on the route × a road-winding factor, there and back) — close enough to decide
+    "worth it or not," not turn-by-turn. <code>Mark 1 eyeballs</code> still apply.
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const $ = id => document.getElementById(id);
+const status = (msg, isErr=false) => { const s=$('status'); s.textContent=msg; s.className=isErr?'err':''; };
+
+let map, routeLayer, stopLayer, routes=[], selectedRoute=0, stops=[], sortMode='detour';
+let startLL=null, endLL=null;
+
+// ---------- map ----------
+function initMap(){
+  map = L.map('map',{zoomControl:true}).setView([38.5,-92],5);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    attribution:'© OpenStreetMap, © CARTO', subdomains:'abcd', maxZoom:19
+  }).addTo(map);
+  routeLayer = L.layerGroup().addTo(map);
+  stopLayer  = L.layerGroup().addTo(map);
+}
+
+// ---------- geo helpers ----------
+const R=6371000, toRad=d=>d*Math.PI/180;
+function haversine(a,b){ // [lat,lon]
+  const dLat=toRad(b[0]-a[0]), dLon=toRad(b[1]-a[1]);
+  const s=Math.sin(dLat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+// distance from point P to segment A-B, all [lat,lon], in meters (local planar approx)
+function distToSeg(P,A,B){
+  const lat0=toRad(P[0]); const kx=Math.cos(lat0)*111320, ky=110540;
+  const p=[P[1]*kx,P[0]*ky], a=[A[1]*kx,A[0]*ky], b=[B[1]*kx,B[0]*ky];
+  const dx=b[0]-a[0], dy=b[1]-a[1];
+  const len2=dx*dx+dy*dy || 1;
+  let t=((p[0]-a[0])*dx+(p[1]-a[1])*dy)/len2; t=Math.max(0,Math.min(1,t));
+  const cx=a[0]+t*dx, cy=a[1]+t*dy;
+  return Math.hypot(p[0]-cx,p[1]-cy);
+}
+function minDistToRoute(P, line){ // line = [[lat,lon],...]
+  let m=Infinity;
+  for(let i=0;i<line.length-1;i++){ const d=distToSeg(P,line[i],line[i+1]); if(d<m)m=d; }
+  return m;
+}
+
+// ---------- external APIs (all client-side, keyless) ----------
+// Robust fetch: surfaces XML/HTML error pages as readable messages instead of
+// blowing up on JSON.parse (that's what the "<?xml vers..." error was).
+async function getJSON(url, opts){
+  const r = await fetch(url, opts);
+  const txt = await r.text();
+  const t = txt.trim();
+  if(t[0]==='<')
+    throw new Error('A map server was busy and rejected the request. Give it a few '+
+      'seconds and try again, or narrow the search width.');
+  if(!r.ok) throw new Error('Map server returned '+r.status+'. Try again shortly.');
+  try{ return JSON.parse(txt); }
+  catch(e){ throw new Error('Unexpected response from a map server. Try again shortly.'); }
+}
+
+async function geocode(q){
+  const url='https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q);
+  const j=await getJSON(url,{headers:{'Accept':'application/json'}});
+  if(!j.length) throw new Error('Could not find "'+q+'". Try adding a state, e.g. "'+q+', MO".');
+  return [parseFloat(j[0].lat), parseFloat(j[0].lon)];
+}
+
+async function fetchRoutes(coords){ // coords = [[lat,lon],...] start..via..end
+  const str = coords.map(c=>c[1]+','+c[0]).join(';'); // OSRM wants lon,lat
+  const url='https://router.project-osrm.org/route/v1/driving/'+str+
+            '?overview=full&geometries=geojson&alternatives=3';
+  const j=await getJSON(url);
+  if(j.code!=='Ok'||!j.routes.length) throw new Error('No drivable route found between those points.');
+  return j.routes.map(rt=>({
+    line: rt.geometry.coordinates.map(c=>[c[1],c[0]]), // -> [lat,lon]
+    miles: rt.distance/1609.34,
+    mins: rt.duration/60
+  }));
+}
+
+function downsample(line, maxPts=80){
+  if(line.length<=maxPts) return line;
+  const step=Math.ceil(line.length/maxPts), out=[];
+  for(let i=0;i<line.length;i+=step) out.push(line[i]);
+  out.push(line[line.length-1]);
+  return out;
+}
+
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter'
+];
+
+async function fetchStations(line){
+  const radM = Math.max(1,parseFloat($('radius').value||6))*1609.34;
+  const pts = downsample(line, 80);
+  const coordStr = pts.map(c=>c[0].toFixed(4)+','+c[1].toFixed(4)).join(',');
+  // One light pass: every fuel station near the corridor. Brand filtering happens
+  // below, in the browser -- far cheaper for the server than a regex scan.
+  const q=`[out:json][timeout:25];nwr["amenity"="fuel"](around:${radM.toFixed(0)},${coordStr});out center tags;`;
+
+  let j=null, lastErr=null;
+  for(const ep of OVERPASS_ENDPOINTS){
+    try{
+      j = await getJSON(ep,{method:'POST',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'data='+encodeURIComponent(q)});
+      break;
+    }catch(e){ lastErr=e; }
+  }
+  if(!j) throw lastErr || new Error('Station data servers were busy. Try again shortly.');
+
+  // brand match: normalize to lowercase alphanumerics, substring test against name/brand/operator
+  const norm = s => (s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const keys = $('brands').value.split(',').map(s=>s.trim()).filter(Boolean).map(norm);
+
+  const seen=new Set(), out=[];
+  for(const el of (j.elements||[])){
+    const lat=el.lat ?? el.center?.lat, lon=el.lon ?? el.center?.lon;
+    if(lat==null) continue;
+    const t=el.tags||{};
+    const hay = norm(t.name)+'|'+norm(t.brand)+'|'+norm(t.operator);
+    if(keys.length && !keys.some(k=>k && hay.includes(k))) continue;
+    const key=lat.toFixed(3)+','+lon.toFixed(3);
+    if(seen.has(key)) continue; seen.add(key);
+    const addr=[t['addr:housenumber'],t['addr:street'],t['addr:city'],t['addr:state']]
+                .filter(Boolean).join(' ');
+    out.push({lat,lon,name:t.name||t.brand||t.operator||'Fuel station',
+              brand:t.brand||t.operator||t.name||'',addr});
+  }
+  return out;
+}
+
+// ---------- economics ----------
+function economics(detourMiles){
+  const delta=+$('delta').value, gal=+$('gallons').value, mpg=+$('mpg').value,
+        price=+$('price').value, speed=+$('speed').value, tv=+$('timeval').value;
+  const save = delta*gal;
+  const detourFuel = (detourMiles/Math.max(mpg,1))*price;
+  const mins = detourMiles/Math.max(speed,1)*60;
+  const timeCost = (mins/60)*tv;
+  const netMoney = save - detourFuel;
+  const netAll = netMoney - timeCost;
+  return {save,detourFuel,mins,timeCost,netMoney,netAll};
+}
+
+// ---------- render ----------
+function renderRoutes(){
+  const card=$('routesCard'); card.style.display = routes.length>1?'block':'none';
+  const wrap=$('routes'); wrap.innerHTML='';
+  routes.forEach((rt,i)=>{
+    const div=document.createElement('div');
+    div.className='ropt'+(i===selectedRoute?' sel':'');
+    const h=Math.floor(rt.mins/60), m=Math.round(rt.mins%60);
+    div.innerHTML=`<span class="nm">Route ${i+1}</span>
+      <span class="sub">${rt.miles.toFixed(0)} mi · ${h}h ${m}m</span>`;
+    div.onclick=()=>{ selectedRoute=i; renderRoutes(); computeStops(); };
+    wrap.appendChild(div);
+  });
+}
+
+function drawMap(){
+  routeLayer.clearLayers(); stopLayer.clearLayers();
+  routes.forEach((rt,i)=>{
+    L.polyline(rt.line,{color:i===selectedRoute?'#4ba3ff':'#3a4150',
+      weight:i===selectedRoute?5:3,opacity:i===selectedRoute?.95:.5}).addTo(routeLayer);
+  });
+  if(startLL) L.circleMarker(startLL,{radius:7,color:'#fff',fillColor:'#43d17a',fillOpacity:1,weight:2})
+    .bindPopup('Start').addTo(routeLayer);
+  if(endLL) L.circleMarker(endLL,{radius:7,color:'#fff',fillColor:'#ff5d5d',fillOpacity:1,weight:2})
+    .bindPopup('Destination').addTo(routeLayer);
+
+  stops.forEach(s=>{
+    const e=s.econ;
+    const m=L.circleMarker([s.lat,s.lon],{radius:8,color:'#171008',weight:2,
+      fillColor:e.netMoney>=0?'#ff8c32':'#5b6675',fillOpacity:1}).addTo(stopLayer);
+    m.bindPopup(`<b>${s.name}</b><br>${s.detourMiles.toFixed(1)} mi · ${Math.round(e.mins)} min off route`+
+      `<br>net ${e.netMoney>=0?'+':''}$${e.netMoney.toFixed(2)} (fuel only)`);
+  });
+  const all=[...routes.flatMap(r=>r.line), ...stops.map(s=>[s.lat,s.lon])];
+  if(all.length) map.fitBounds(L.latLngBounds(all).pad(.12));
+}
+
+function renderStops(){
+  const res=$('results'); $('toolbar').style.display = stops.length?'flex':'none';
+  $('count').textContent = stops.length+' stop'+(stops.length!==1?'s':'');
+  if(!stops.length){
+    res.innerHTML='<div class="empty">No warehouse-club fuel stops found within the search width of this route.'+
+      ' Try widening the search width, adding brands, or a different route option.</div>';
+    return;
+  }
+  const sorted=[...stops].sort((a,b)=> sortMode==='detour'
+    ? a.detourMiles-b.detourMiles : b.econ.netAll-a.econ.netAll);
+  res.innerHTML='';
+  for(const s of sorted){
+    const e=s.econ, pos=e.netMoney>=0;
+    const div=document.createElement('div'); div.className='stop';
+    div.innerHTML=`
+      <div>
+        <span class="brand">${s.brand||'fuel'}</span>
+        <div class="name">${s.name}</div>
+        ${s.addr?`<div class="addr">${s.addr}</div>`:''}
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="v">${s.detourMiles.toFixed(1)}</div><div class="k">mi off</div></div>
+        <div class="metric"><div class="v">${Math.round(e.mins)}</div><div class="k">min off</div></div>
+      </div>
+      <div class="verdict">
+        <span class="net ${pos?'pos':'neg'}">${pos?'+':''}$${e.netMoney.toFixed(2)} saved</span>
+        <span class="why">vs $${e.save.toFixed(2)} at the pump · ~$${e.detourFuel.toFixed(2)} burned getting there
+          · net of your time ${e.netAll>=0?'+':''}$${e.netAll.toFixed(2)}</span>
+      </div>`;
+    div.onmouseenter=()=>map.panTo([s.lat,s.lon]);
+    res.appendChild(div);
+  }
+}
+
+function computeStops(){
+  const line=routes[selectedRoute].line;
+  stops.forEach(s=>{
+    const m=minDistToRoute([s.lat,s.lon],line);
+    s.detourMiles = (m*1.35*2)/1609.34; // winding factor, round trip
+    s.econ=economics(s.detourMiles);
+  });
+  drawMap(); renderStops();
+}
+
+// ---------- main ----------
+async function run(){
+  $('go').disabled=true;
+  try{
+    status('Looking up start & destination…');
+    startLL = await geocode($('start').value.trim());
+    endLL   = await geocode($('end').value.trim());
+    const via=$('via').value.trim();
+    const coords=[startLL];
+    if(via){ status('Looking up via point…'); coords.push(await geocode(via)); }
+    coords.push(endLL);
+
+    status('Plotting route(s)…');
+    routes = await fetchRoutes(coords);
+    selectedRoute=0; renderRoutes(); drawMap();   // show the route right away
+
+    status('Searching the corridor for warehouse-club fuel…');
+    const raw = await fetchStations(routes[selectedRoute].line);
+    stops = raw.map(s=>({...s}));
+
+    computeStops();
+    status(stops.length
+      ? `Done — ${stops.length} stop${stops.length!==1?'s':''} found.`
+      : 'Route found, but no matching stations in the corridor.');
+  }catch(err){
+    status(err.message||'Something went wrong. Try again in a moment.', true);
+  }finally{ $('go').disabled=false; }
+}
+
+// ---------- wire up ----------
+window.addEventListener('DOMContentLoaded',()=>{
+  initMap();
+  $('go').onclick=run;
+  document.querySelectorAll('.sortbtn').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll('.sortbtn').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); sortMode=b.dataset.sort; renderStops();
+  });
+  // recompute economics live when you tweak the numbers (no re-fetch)
+  ['delta','gallons','mpg','price','speed','timeval'].forEach(id=>
+    $(id).addEventListener('input',()=>{ if(stops.length) computeStops(); }));
+  $('start').addEventListener('keydown',e=>{if(e.key==='Enter')run();});
+  $('end').addEventListener('keydown',e=>{if(e.key==='Enter')run();});
+});
+</script>
+</body>
+</html>
