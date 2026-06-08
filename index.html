@@ -84,6 +84,11 @@
   .stop .brand{display:inline-block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;
     color:var(--accent);margin-bottom:3px}
   .stop .addr{font-size:12px;color:var(--faint);margin-top:3px;line-height:1.4}
+  .stop .addr.none{font-style:italic;opacity:.8}
+  .stop .meta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;align-items:center}
+  .stop .meta a{color:var(--accent);text-decoration:none}
+  .stop .meta a:hover{text-decoration:underline}
+  .stop .meta .hrs{color:var(--dim)}
   .metrics{display:flex;gap:18px;text-align:right;font-family:"IBM Plex Mono",monospace}
   .metric .v{font-size:18px;font-weight:600;line-height:1.1}
   .metric .k{font-size:10px;color:var(--faint);letter-spacing:.5px;text-transform:uppercase;margin-top:3px}
@@ -178,8 +183,10 @@
 <script>
 const $ = id => document.getElementById(id);
 const status = (msg, isErr=false) => { const s=$('status'); s.textContent=msg; s.className=isErr?'err':''; };
+const esc = s => (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+const mapsUrl = s => `https://www.google.com/maps/search/?api=1&query=${s.lat}%2C${s.lon}`;
 
-let map, routeLayer, stopLayer, routes=[], selectedRoute=0, stops=[], sortMode='detour';
+let map, routeLayer, stopLayer, routes=[], selectedRoute=0, stops=[], sortMode='detour', scannedCount=0;
 let startLL=null, endLL=null;
 
 // ---------- map ----------
@@ -286,8 +293,11 @@ async function fetchStations(line){
   const norm = s => (s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
   const keys = $('brands').value.split(',').map(s=>s.trim()).filter(Boolean).map(norm);
 
+  const all = (j.elements||[]).filter(el=>(el.lat ?? el.center?.lat)!=null);
+  scannedCount = all.length;   // how many fuel stations were actually in the corridor
+
   const seen=new Set(), out=[];
-  for(const el of (j.elements||[])){
+  for(const el of all){
     const lat=el.lat ?? el.center?.lat, lon=el.lon ?? el.center?.lon;
     if(lat==null) continue;
     const t=el.tags||{};
@@ -298,7 +308,10 @@ async function fetchStations(line){
     const addr=[t['addr:housenumber'],t['addr:street'],t['addr:city'],t['addr:state']]
                 .filter(Boolean).join(' ');
     out.push({lat,lon,name:t.name||t.brand||t.operator||'Fuel station',
-              brand:t.brand||t.operator||t.name||'',addr});
+              brand:t.brand||t.operator||t.name||'',addr,
+              phone:t.phone||t['contact:phone']||t['contact:mobile']||'',
+              hours:t.opening_hours||'',
+              website:t.website||t['contact:website']||''});
   }
   return out;
 }
@@ -346,8 +359,11 @@ function drawMap(){
     const e=s.econ;
     const m=L.circleMarker([s.lat,s.lon],{radius:8,color:'#171008',weight:2,
       fillColor:e.netMoney>=0?'#ff8c32':'#5b6675',fillOpacity:1}).addTo(stopLayer);
-    m.bindPopup(`<b>${s.name}</b><br>${s.detourMiles.toFixed(1)} mi · ${Math.round(e.mins)} min off route`+
-      `<br>net ${e.netMoney>=0?'+':''}$${e.netMoney.toFixed(2)} (fuel only)`);
+    m.bindPopup(`<b>${esc(s.name)}</b>`+
+      (s.addr?`<br>${esc(s.addr)}`:'')+
+      `<br>${s.detourMiles.toFixed(1)} mi · ${Math.round(e.mins)} min off route`+
+      `<br>net ${e.netMoney>=0?'+':''}$${e.netMoney.toFixed(2)} (fuel only)`+
+      `<br><a href="${mapsUrl(s)}" target="_blank" rel="noopener">Open in Maps ↗</a>`);
   });
   const all=[...routes.flatMap(r=>r.line), ...stops.map(s=>[s.lat,s.lon])];
   if(all.length) map.fitBounds(L.latLngBounds(all).pad(.12));
@@ -369,9 +385,15 @@ function renderStops(){
     const div=document.createElement('div'); div.className='stop';
     div.innerHTML=`
       <div>
-        <span class="brand">${s.brand||'fuel'}</span>
-        <div class="name">${s.name}</div>
-        ${s.addr?`<div class="addr">${s.addr}</div>`:''}
+        <span class="brand">${esc(s.brand)||'fuel'}</span>
+        <div class="name">${esc(s.name)}</div>
+        ${s.addr?`<div class="addr">${esc(s.addr)}</div>`
+                :`<div class="addr none">no address in OpenStreetMap — use Maps link</div>`}
+        <div class="meta">
+          ${s.phone?`<a href="tel:${s.phone.replace(/[^0-9+]/g,'')}">${esc(s.phone)}</a>`:''}
+          ${s.hours?`<span class="hrs" title="${esc(s.hours)}">${esc(s.hours.length>34?s.hours.slice(0,32)+'…':s.hours)}</span>`:''}
+          <a href="${mapsUrl(s)}" target="_blank" rel="noopener">Open in Maps ↗</a>
+        </div>
       </div>
       <div class="metrics">
         <div class="metric"><div class="v">${s.detourMiles.toFixed(1)}</div><div class="k">mi off</div></div>
@@ -418,9 +440,16 @@ async function run(){
     stops = raw.map(s=>({...s}));
 
     computeStops();
-    status(stops.length
-      ? `Done — ${stops.length} stop${stops.length!==1?'s':''} found.`
-      : 'Route found, but no matching stations in the corridor.');
+    if(stops.length){
+      status(`Done — ${stops.length} stop${stops.length!==1?'s':''} found `+
+             `(scanned ${scannedCount} fuel stations in the corridor).`);
+    } else if(scannedCount>0){
+      status(`Route found. Scanned ${scannedCount} fuel stations within the corridor, but none `+
+             `matched your brands — widen the search width or check the brand list.`);
+    } else {
+      status('Route found, but no fuel stations at all turned up in the corridor — '+
+             'try widening the search width, or the data server may have returned nothing (retry).');
+    }
   }catch(err){
     status(err.message||'Something went wrong. Try again in a moment.', true);
   }finally{ $('go').disabled=false; }
