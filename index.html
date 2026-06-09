@@ -84,6 +84,8 @@
   .stop .brand{display:inline-block;font-size:11px;letter-spacing:.5px;text-transform:uppercase;
     color:var(--accent);margin-bottom:3px}
   .stop .addr{font-size:12px;color:var(--faint);margin-top:3px;line-height:1.4}
+  .stop .along{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--accent);
+    margin-top:4px;letter-spacing:.3px}
   .stop .addr.none{font-style:italic;opacity:.8}
   .stop .meta{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12.5px;align-items:center}
   .stop .meta a{color:var(--accent);text-decoration:none}
@@ -158,7 +160,8 @@
       <div id="map"></div>
       <div class="toolbar" id="toolbar" style="display:none">
         <span style="font-size:12px;color:var(--dim)">Sort:</span>
-        <button class="sortbtn on" data-sort="detour">Closest to route</button>
+        <button class="sortbtn on" data-sort="along">Along route</button>
+        <button class="sortbtn" data-sort="detour">Closest to route</button>
         <button class="sortbtn" data-sort="value">Best value</button>
         <span class="count" id="count"></span>
       </div>
@@ -186,7 +189,7 @@ const status = (msg, isErr=false) => { const s=$('status'); s.textContent=msg; s
 const esc = s => (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const mapsUrl = s => `https://www.google.com/maps/search/?api=1&query=${s.lat}%2C${s.lon}`;
 
-let map, routeLayer, stopLayer, routes=[], selectedRoute=0, stops=[], sortMode='detour', scannedCount=0;
+let map, routeLayer, stopLayer, routes=[], selectedRoute=0, stops=[], sortMode='along', scannedCount=0;
 let startLL=null, endLL=null;
 
 // ---------- map ----------
@@ -220,6 +223,25 @@ function minDistToRoute(P, line){ // line = [[lat,lon],...]
   let m=Infinity;
   for(let i=0;i<line.length-1;i++){ const d=distToSeg(P,line[i],line[i+1]); if(d<m)m=d; }
   return m;
+}
+// Returns {dist: meters off route, along: meters from route start to the nearest point}
+function projectOnRoute(P, line){
+  const lat0=toRad(P[0]); const kx=Math.cos(lat0)*111320, ky=110540;
+  const p=[P[1]*kx,P[0]*ky];
+  let best={dist:Infinity, along:0}, cum=0;
+  for(let i=0;i<line.length-1;i++){
+    const A=line[i], B=line[i+1];
+    const segLen=haversine(A,B);
+    const a=[A[1]*kx,A[0]*ky], b=[B[1]*kx,B[0]*ky];
+    const dx=b[0]-a[0], dy=b[1]-a[1];
+    const len2=dx*dx+dy*dy || 1;
+    let t=((p[0]-a[0])*dx+(p[1]-a[1])*dy)/len2; t=Math.max(0,Math.min(1,t));
+    const cx=a[0]+t*dx, cy=a[1]+t*dy;
+    const d=Math.hypot(p[0]-cx,p[1]-cy);
+    if(d<best.dist) best={dist:d, along:cum + t*segLen};
+    cum += segLen;
+  }
+  return best;
 }
 
 // ---------- external APIs (all client-side, keyless) ----------
@@ -361,7 +383,7 @@ function drawMap(){
       fillColor:e.netMoney>=0?'#ff8c32':'#5b6675',fillOpacity:1}).addTo(stopLayer);
     m.bindPopup(`<b>${esc(s.name)}</b>`+
       (s.addr?`<br>${esc(s.addr)}`:'')+
-      `<br>${s.detourMiles.toFixed(1)} mi · ${Math.round(e.mins)} min off route`+
+      `<br>mile ${Math.round(s.alongMiles)} · ${s.detourMiles.toFixed(1)} mi · ${Math.round(e.mins)} min off route`+
       `<br>net ${e.netMoney>=0?'+':''}$${e.netMoney.toFixed(2)} (fuel only)`+
       `<br><a href="${mapsUrl(s)}" target="_blank" rel="noopener">Open in Maps ↗</a>`);
   });
@@ -377,8 +399,12 @@ function renderStops(){
       ' Try widening the search width, adding brands, or a different route option.</div>';
     return;
   }
-  const sorted=[...stops].sort((a,b)=> sortMode==='detour'
-    ? a.detourMiles-b.detourMiles : b.econ.netAll-a.econ.netAll);
+  const routeMiles = routes[selectedRoute]?.miles || 0;
+  const sorted=[...stops].sort((a,b)=>{
+    if(sortMode==='detour') return a.detourMiles-b.detourMiles;
+    if(sortMode==='value')  return b.econ.netAll-a.econ.netAll;
+    return a.alongMiles-b.alongMiles;            // 'along' — order encountered
+  });
   res.innerHTML='';
   for(const s of sorted){
     const e=s.econ, pos=e.netMoney>=0;
@@ -387,6 +413,7 @@ function renderStops(){
       <div>
         <span class="brand">${esc(s.brand)||'fuel'}</span>
         <div class="name">${esc(s.name)}</div>
+        <div class="along">▸ mile ${Math.round(s.alongMiles)} of ${Math.round(routeMiles)}</div>
         ${s.addr?`<div class="addr">${esc(s.addr)}</div>`
                 :`<div class="addr none">no address in OpenStreetMap — use Maps link</div>`}
         <div class="meta">
@@ -412,8 +439,9 @@ function renderStops(){
 function computeStops(){
   const line=routes[selectedRoute].line;
   stops.forEach(s=>{
-    const m=minDistToRoute([s.lat,s.lon],line);
-    s.detourMiles = (m*1.35*2)/1609.34; // winding factor, round trip
+    const pr=projectOnRoute([s.lat,s.lon],line);
+    s.detourMiles = (pr.dist*1.35*2)/1609.34; // winding factor, round trip
+    s.alongMiles  = pr.along/1609.34;          // miles from start, along the route
     s.econ=economics(s.detourMiles);
   });
   drawMap(); renderStops();
